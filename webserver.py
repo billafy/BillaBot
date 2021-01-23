@@ -5,7 +5,7 @@ app = Flask('')
 
 @app.route('/')
 def home() : 
-  return "Webserver and Discord Bot running"
+  return "Webserver running BillaBot"
 
 def run() : 
   app.run(host="0.0.0.0",port=8000)
