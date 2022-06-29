@@ -39,7 +39,7 @@ billaBot = commands.Bot(command_prefix="billa ", intents=intents)
 billaBot.remove_command("help")
 
 FFMPEG_OPTIONS = {
-    "executable": "https://drive.google.com/file/d/15EHmXvcKK94pDA8MhfY0fTz_j8Qurtp4/view?usp=sharing",
+    "executable": "./ffmpeg.exe",
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
     "options": "-vn",
 }
