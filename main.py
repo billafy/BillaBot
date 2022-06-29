@@ -38,6 +38,8 @@ intents.messages = True
 billaBot = commands.Bot(command_prefix="billa ", intents=intents)
 billaBot.remove_command("help")
 
+discord.opus.load_opus()
+
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
     "options": "-vn",
