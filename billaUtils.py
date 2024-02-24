@@ -1,13 +1,10 @@
 import discord
 import requests
 import json
-import youtube_dl
 from numpy import random
 from randomTexts import violentTexts
 from gtts import gTTS
-
-YDL_OPTIONS = {'audio-format': 'mp3', 'noplaylist':'True'}
-FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+from datetime import datetime, timezone
 
 async def sendEmbed(ctx,title,description) : 
     await ctx.send(embed=discord.Embed(title=title,description=description,colour=discord.Colour(0xE5E242)))
@@ -43,17 +40,6 @@ def getVoiceClient(billaBot,ctx) :
 		if vc.guild == ctx.guild :
 			return vc
 	return None	
-
-def searchSong(songName) :
-	with youtube_dl.YoutubeDL(YDL_OPTIONS) as ydl :
-		song = ydl.extract_info(f'ytsearch:{songName}',download=False)['entries'][0]
-	return {'source':song['formats'][0]['url'],'title':song['title']}
-
-def playNextSong(ctx,voiceClient,songQueueMap) :
-	del songQueueMap[ctx.guild.name][0]
-	if len(songQueueMap[ctx.guild.name]) > 0 :
-		voiceClient.play(discord.FFmpegPCMAudio(songQueueMap[ctx.guild.name][0]['source'],**FFMPEG_OPTIONS),after=lambda e: playNextSong(ctx,voiceClient,songQueueMap))
-		voiceClient.is_playing()
 
 async def checkVoiceExceptions(billaBot,ctx,command) :
 	if ctx.author.voice is None :
@@ -106,3 +92,24 @@ def getLiveMatches() :
 def getImage(url) :
 	response = requests.get(url, stream = True)
 	return response.raw
+
+async def get_latest_conversation(channel, client, message_count=100): 
+	conversation = "--- start of conversation ---\n" 
+	messages = client.get_channel(channel.id).history(limit=message_count)
+	messages = [message async for message in messages]
+	messages.reverse()
+	users = set(["lamify"])
+	for i in range(len(messages)): 
+			if messages[i].author.name != "BillaBot": 
+					try: 
+						users.add(messages[i].author.nick)
+					except Exception as e:  
+						users.add(messages[i].author.name)
+			if messages[i].content == "billa summary" or (i - 1 >= 0 and messages[i - 1].content == "billa summary"): 
+					continue
+			duration = datetime.now(timezone.utc) - messages[i].created_at
+			if duration.total_seconds() <= 12 * 60 * 60: 
+					conversation += f'{messages[i].author.name} : {messages[i].content}'
+					conversation += "\n"
+	conversation += "--- end of conversation ---\n"
+	return conversation, users

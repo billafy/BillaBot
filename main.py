@@ -1,57 +1,57 @@
 import os
 import discord
-import json
 from dotenv import load_dotenv
 from numpy import random
 from discord.ext import commands
+from get_gemini_response import generate_gemini_response
+from get_google_images import get_google_images
 from randomTexts import (
     helpText,
     helloTexts,
     emoteIDs,
-    niceTexts,
-    kindaNiceTexts,
-    strangerTexts,
-    kindaHateTexts,
-    hateTexts,
     rpsEmotes,
+    billaEmoteIds,
 )
 from billaUtils import (
     sendEmbed,
     sendGif,
     echo,
     getVoiceClient,
-    searchSong,
-    playNextSong,
     checkVoiceExceptions,
     getLiveMatches,
     getImage,
+    get_latest_conversation,
 )
 from PIL import Image
 from io import BytesIO
 import requests
+from pagination import DiscordPagination
+from datetime import datetime, timezone
 
 load_dotenv()
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-intents = discord.Intents.default()
+intents = discord.Intents.all()
 intents.members = True
 intents.messages = True
 billaBot = commands.Bot(command_prefix="billa ", intents=intents)
 billaBot.remove_command("help")
 
-# discord.opus.load_opus()
-
-FFMPEG_OPTIONS = {
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn",
-}
-songQueueMap = dict({})
 emotes = []
-
+billaEmotes = dict()
+expression_string = ""
+for expression in billaEmoteIds.keys(): 
+    expression_string += expression
+    expression_string += ", "
 
 @billaBot.event
 async def on_ready():
     for emoteID in emoteIDs:
         emotes.append(billaBot.get_emoji(emoteID))
+    for expression in billaEmoteIds: 
+        billaEmotes[expression] = billaBot.get_emoji(int(billaEmoteIds[expression]))
+    for guild in billaBot.guilds:
+        channel = guild.get_channel(528221649150017537)
+        if channel:
+            break
     print(f"{billaBot.user} has connected to Discord!")
     await billaBot.change_presence(
         activity=discord.Activity(
@@ -63,14 +63,67 @@ async def on_ready():
 
 @billaBot.event
 async def on_message(message):
-    if message.content.find("?") != -1 and len(message.content) > 1:
+    if message.content.find("?") != -1 and len(message.content) > 1 and message.author.id != 776675605340094484:
         lottery = random.randint(1, 10)
         if lottery <= 3:
             await message.add_reaction(random.choice(emotes))
 
-    if message.content.lower().startswith("hello billa") and len(message.content) > 12:
-        response = random.choice(helloTexts)
-        await message.channel.send(content=response["text"])
+    is_lamify_mentioned = False
+    for mention in message.mentions: 
+        if mention.name == "lamify": 
+            is_lamify_mentioned = True
+
+    # if (
+    #     (message.content.lower().find("lamify") != -1 or message.content.lower().find("yash") != -1 or message.content.lower().find("billa") != -1) and
+    #     not is_lamify_mentioned and
+    #     message.author.name != "lamify"
+    # ):
+    #     await message.channel.send(f'<@377832472697634817>')
+    
+    if message.content.lower().startswith("hello billa") and len(message.content) > 12: 
+        conversation, users = await get_latest_conversation(message.channel, billaBot)
+        query = conversation
+        query += "\n"
+        message_content = " ".join(message.content.split(" ")[2:])
+        query += f'Query - {message_content}. Respond to this query in 1 to 3 short sentences. Take any context if needed from the above conversation. Do not repeat anything as it is from the conversation. Use UK roadman slang. Do not separate answer in points.'
+        async with message.channel.typing(): 
+            response = generate_gemini_response(query)
+            emoji_query = f"Text - {response}. List of expressions - [{expression_string}]. Based on the text, tell which expression from list suits the text. Just send the expression name, nothing else at all."
+            emoji_response = generate_gemini_response(emoji_query)
+            
+            if random.choice([1, 2, 3]) <= 2: 
+                try: 
+                    emoji = billaEmotes[emoji_response.lower()]
+                    response += f" {emoji}"
+                except: 
+                    pass
+
+            if len(response) == 0: 
+                return
+
+            if len(response) <= 2000:
+                await message.channel.send(response)
+            else:
+                parts = [response[i:i + 2000] for i in range(0, len(response), 2000)]
+                for part in parts:
+                    await message.channel.send(part)
+
+    if message.content.lower().startswith("hello billu") and len(message.content) > 12:        
+        query = " ".join(message.content.split(" ")[2:])
+        query = f'{query}. Give baby yoda language reply in 1 to 3 short sentences. Do not separate answer in points. Instead of Yoda or Baby Yoda call yourself Billu'
+
+        async with message.channel.typing(): 
+            response = generate_gemini_response(query)
+
+            if len(response) == 0: 
+                return
+
+            if len(response) <= 2000:
+                await message.channel.send(response)
+            else:
+                parts = [response[i:i + 2000] for i in range(0, len(response), 2000)]
+                for part in parts:
+                    await message.channel.send(part)
 
     await billaBot.process_commands(message)
 
@@ -79,115 +132,14 @@ async def on_message(message):
 async def billaHelp(ctx):
     await sendEmbed(ctx=ctx, title="BillaBot Commands", description=helpText)
 
-
-@billaBot.command(name="join")
-async def billaJoin(ctx):
-    if await checkVoiceExceptions(billaBot, ctx, "join"):
-        return
-    voiceClient = getVoiceClient(billaBot, ctx)
-    voiceChannel = ctx.author.voice.channel
-    if voiceClient is None:
-        voiceClient = await voiceChannel.connect()
-    joinTexts = [
-        "I am ready",
-        f"Joined {voiceChannel.name}",
-        f"Connected to {voiceChannel.name}",
-    ]
-    await echo(ctx=ctx, voiceClient=voiceClient, message=random.choice(joinTexts))
-    await sendEmbed(ctx=ctx, title="", description=f"Joined {voiceChannel.name}")
-
-
-@billaBot.command(name="play")
-async def billaPlay(ctx):
-    if await checkVoiceExceptions(billaBot, ctx, "play"):
-        return
-    voiceClient = getVoiceClient(billaBot, ctx)
-    voiceChannel = ctx.author.voice.channel
-    if voiceClient is None:
-        voiceClient = await voiceChannel.connect()
-    songName = ctx.message.content[11:]
-    song = searchSong(songName)
-    songTitle = song["title"]
-
-    if ctx.guild.name in songQueueMap:
-        songQueueMap[ctx.guild.name].append(song)
-    else:
-        songQueueMap[ctx.guild.name] = []
-        songQueueMap[ctx.guild.name].append(song)
-
-    if not voiceClient.is_playing():
-        await sendEmbed(ctx=ctx, title="Playing", description=f"{songTitle}")
-        audio = discord.FFmpegPCMAudio(
-            songQueueMap[ctx.guild.name][0]["source"], **FFMPEG_OPTIONS
-        )
-        voiceClient.play(
-            audio, after=lambda e: playNextSong(ctx, voiceClient, songQueueMap)
-        )
-        voiceClient.is_playing()
-    else:
-        await sendEmbed(ctx=ctx, title="Queued", description=f"{songTitle}")
-
-
-@billaBot.command(name="skip")
-async def billaSkip(ctx):
-    if await checkVoiceExceptions(billaBot, ctx, "skip"):
-        return
-    voiceClient = getVoiceClient(billaBot, ctx)
-    voiceChannel = ctx.author.voice.channel
-    if len(songQueueMap[ctx.guild.name]) > 0:
-        songTitle = songQueueMap[ctx.guild.name][0]["title"]
-        await voiceClient.disconnect()
-        voiceClient = await voiceChannel.connect()
-        await sendEmbed(ctx=ctx, title="Skipped", description=songTitle)
-        if len(songQueueMap[ctx.guild.name]) > 0:
-            voiceClient.play(
-                discord.FFmpegPCMAudio(
-                    songQueueMap[ctx.guild.name][0]["source"], **FFMPEG_OPTIONS
-                ),
-                after=lambda e: playNextSong(ctx, voiceClient, songQueueMap),
-            )
-    else:
-        await sendEmbed(ctx=ctx, title="", description="Nothing to skip.")
-
-
-@billaBot.command(name="remove")
-async def billaRemove(ctx, arg):
-    if await checkVoiceExceptions(billaBot, ctx, "remove"):
-        return
-    if arg.isnumeric():
-        if int(arg) > len(songQueueMap[ctx.guild.name]) or int(arg) < 1:
-            await sendEmbed(
-                ctx=ctx,
-                title="Invalid argument",
-                description="Index position out of bounds.",
-            )
-            return
-        if int(arg) == 1:
-            await sendEmbed(ctx=ctx, title="", description="Just use skip instead smh.")
-            return
-        songTitle = songQueueMap[ctx.guild.name][int(arg) - 1]["title"]
-        del songQueueMap[ctx.guild.name][int(arg) - 1]
-        await sendEmbed(ctx=ctx, title="Removed", description=f"{songTitle}")
-    else:
-        await sendEmbed(
-            ctx=ctx,
-            title="Invalid argument",
-            description="Please enter a valid index position.",
-        )
-
-
-@billaBot.command(name="queue")
-async def billaQueue(ctx):
-    if ctx.guild.name in songQueueMap:
-        queue = ""
-        i = 1
-        for song in songQueueMap[ctx.guild.name]:
-            queue += str(i) + ". " + song["title"] + "\n"
-            i += 1
-        await sendEmbed(ctx=ctx, title=f"{ctx.guild.name} Queue", description=queue)
-    else:
-        await sendEmbed(ctx=ctx, title="", description="Nothing queued.")
-
+@billaBot.command(name="say")
+async def billaSay(ctx): 
+    content = ctx.message.content
+    try: 
+        await ctx.message.delete()
+    except: 
+        pass
+    await ctx.channel.send(content.replace("billa say", "").strip())
 
 @billaBot.command(name="echo")
 async def billaEcho(ctx):
@@ -199,17 +151,25 @@ async def billaEcho(ctx):
         voiceClient = await voiceChannel.connect()
     await echo(ctx, voiceClient, ctx.message.content[11:])
 
+@billaBot.command(name="summary")
+async def billaSummary(ctx): 
+    conversation, users = await get_latest_conversation(ctx.channel, billaBot)
+    query = conversation
+    random_user = random.choice(list(users))
+    query += f'Summarize the above conversation in 5 to 7 short sentences. Use UK roadman slang. Do not separate answer in points. Your name is BillaBot in this conversation. Only if the conversation is empty, roast {random_user} in a crazy way.'
 
-@billaBot.command(name="disconnect")
-async def billaDisconnect(ctx):
-    if await checkVoiceExceptions(billaBot, ctx, "disconnect"):
-        return
-    voiceClient = getVoiceClient(billaBot, ctx)
-    if ctx.guild.name in songQueueMap:
-        songQueueMap[ctx.guild.name] = []
-    await voiceClient.disconnect()
-    await sendEmbed(ctx=ctx, title="", description="Disconnected")
+    async with ctx.channel.typing(): 
+        response = generate_gemini_response(query)
 
+        if len(response) == 0: 
+            return
+
+        if len(response) <= 2000:
+            await ctx.channel.send(response)
+        else:
+            parts = [response[i:i + 2000] for i in range(0, len(response), 2000)]
+            for part in parts:
+                await ctx.channel.send(part)
 
 @billaBot.command(name="kick")
 async def billaKick(ctx):
@@ -254,6 +214,31 @@ async def billaRps(ctx):
         title=result,
         description=f"{rpsEmotes[userChoice]} {rpsEmotes[botChoice]}",
     )
+
+
+@billaBot.command(name="query")
+async def billaQuery(ctx):
+    args = ctx.message.content.split(" ")[2:]
+    if len(args) == 0:
+        await sendEmbed(ctx=ctx, title="", description="Enter a search query.")
+        return
+    query = " ".join(list(args))
+    image_links = get_google_images(query)
+    if len(image_links) == 0:
+        await sendEmbed(ctx=ctx, title="", description="No results found.")
+        return
+    embeds = []
+    for i in range(len(image_links)):
+        embed = discord.Embed(title=image_links[i]["text"], url=image_links[i]["link"])
+        embed.set_footer(text=f"Searching '{query}' - {i + 1}/{len(image_links)}")
+        embed.set_image(url=image_links[i]["src"])
+        embeds.append(embed)
+
+    async def get_page(page: int):
+        embed = embeds[page]
+        return embed
+
+    await DiscordPagination(ctx, get_page).navigate()
 
 
 @billaBot.command(name="live")
@@ -312,4 +297,9 @@ async def billaWeeb(ctx):
         os.remove(f"{filename}.{extension}")
 
 
-billaBot.run(DISCORD_TOKEN)
+try: 
+    DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+    billaBot.run(DISCORD_TOKEN)
+except discord.errors.HTTPException: 
+    os.system("python restarter.py")
+    os.system("kill 1")
